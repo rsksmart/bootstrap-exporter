@@ -1,0 +1,19 @@
+plugins {
+  id 'application'
+}
+
+sourceCompatibility = '1.8'
+targetCompatibility = '1.8'
+version = '0.0.1'
+mainClassName = 'co.rsk.core.db.bootstrap.FileExporter'
+
+repositories {
+  jcenter()
+  maven {
+    url "https://deps.rsklabs.io"
+  }
+}
+
+dependencies {
+  compile 'co.rsk:rskj-core:1.1.0-SNAPSHOT'
+}
