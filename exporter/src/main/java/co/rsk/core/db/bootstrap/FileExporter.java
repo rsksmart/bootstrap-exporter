@@ -27,13 +27,11 @@ import org.ethereum.core.Block;
 import org.ethereum.core.BlockFactory;
 import org.ethereum.datasource.KeyValueDataSource;
 import org.ethereum.db.IndexedBlockStore;
+import org.ethereum.util.RLP;
 import org.mapdb.DB;
 import org.mapdb.DBMaker;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -46,14 +44,13 @@ public class FileExporter{
 
     public static void main(String[] args) throws IOException {
         String originDatabaseDir = "/database";
+        if (args.length > 1 && args[1] != null) {
+            originDatabaseDir = args[1];
+        }
+
         KeyValueDataSource originBlockStoreDataSource = RskContext.makeDataSource("blocks", originDatabaseDir);
         MapDBBlocksIndex originBlockStoreIndex = getBlockIndex(originDatabaseDir);
         TrieStoreImpl originUnitrieStore = getTrieStore(originDatabaseDir);
-
-        String destinationDatabaseDir = "/output/export";
-        KeyValueDataSource destinationBlockStoreDataSource = RskContext.makeDataSource("blocks", destinationDatabaseDir);
-        MapDBBlocksIndex destinationBlockStoreIndex = getBlockIndex(destinationDatabaseDir);
-        TrieStoreImpl destinationUnitrieStore = getTrieStore(destinationDatabaseDir);
 
         long to = Long.valueOf(args[0]);
         long from = to - BLOCKS_NEEDED;
@@ -62,16 +59,20 @@ public class FileExporter{
         BlockFactory blockFactory = new BlockFactory(new ActivationConfig(all()));
         Block bestBlock = blockFactory.decodeBlock(originBlockStoreDataSource.get(bestInfo.get().getHash().getBytes()));
 
-        moveBlocks(originBlockStoreDataSource, originBlockStoreIndex, destinationBlockStoreDataSource, destinationBlockStoreIndex, from, to);
-        moveState(originUnitrieStore, destinationUnitrieStore, bestBlock);
+        byte[] blocks = encodeBlocks(originBlockStoreDataSource, originBlockStoreIndex, from, to);
+        byte[] state = encodeState(originUnitrieStore, bestBlock);
+        byte[] bootstrap = RLP.encodeList(RLP.encodeElement(blocks), RLP.encodeElement(state));
 
-        FileOutputStream fos = new FileOutputStream("/output/bootstrap-data.zip");
+        String destinationFolder = "/output/";
+        if (args.length > 2 && args[2] != null){
+            destinationFolder = args[2];
+        }
+
+        FileOutputStream fos = new FileOutputStream(destinationFolder + "bootstrap-data.zip");
         ZipOutputStream zipOut = new ZipOutputStream(fos);
-        File fileToZip = new File(destinationDatabaseDir);
 
-        zipFile(fileToZip, fileToZip.getName(), zipOut);
+        zipFile(new ByteArrayInputStream(bootstrap), "bootstrap-data.bin", zipOut);
         zipOut.close();
-        fos.close();
     }
 
     private static TrieStoreImpl getTrieStore(String originDatabaseDir) {
@@ -97,40 +98,58 @@ public class FileExporter{
         return new MapDBBlocksIndex(indexDB);
     }
 
-    private static void moveBlocks(KeyValueDataSource originBlockStoreDataSource,
-                                   MapDBBlocksIndex originBlockStoreIndex,
-                                   KeyValueDataSource destinationBlockStoreDataSource,
-                                   MapDBBlocksIndex destinationBlockStoreIndex,
-                                   long from,
-                                   long to) {
+    private static byte[] encodeBlocks(KeyValueDataSource originBlockStoreDataSource,
+                                       MapDBBlocksIndex originBlockStoreIndex,
+                                       long from,
+                                       long to) {
 
-        System.out.printf("Moving blocks from %d to %d", from, to);
+        System.out.printf("Encoding blocks from %d to %d", from, to);
         System.out.println();
+        byte[][] encodedBlocks = new byte[BLOCKS_NEEDED][];
         for(int i = 0; i < to - from; i++) {
+            byte[][] encodedTuple = new byte[2][];
             long blockNumber = from + (i + 1);
+            final int j = i;
             List<IndexedBlockStore.BlockInfo> blockInfos = originBlockStoreIndex.getBlocksByNumber(blockNumber);
-            destinationBlockStoreIndex.putBlocks(blockNumber, blockInfos);
-            blockInfos.forEach(bi -> destinationBlockStoreDataSource.put(bi.getHash().getBytes(),
-                    originBlockStoreDataSource.get(bi.getHash().getBytes())));
+            blockInfos.stream()
+                    .filter(IndexedBlockStore.BlockInfo::isMainChain)
+                    .forEach(bi -> {
+                        encodedTuple[0] = RLP.encodeElement(originBlockStoreDataSource.get(bi.getHash().getBytes()));
+                        encodedTuple[1] = RLP.encodeElement(bi.getCummDifficulty().getBytes());
+                        encodedBlocks[j] = RLP.encodeList(encodedTuple);
+                    });
         }
-        destinationBlockStoreIndex.flush();
+
+        return RLP.encodeList(encodedBlocks);
     }
 
-    private static void moveState(TrieStoreImpl originUnitrieStore, TrieStoreImpl destinationUnitrieStore, Block block) {
+    private static byte[] encodeState(TrieStoreImpl originUnitrieStore, Block block) {
         Trie node = originUnitrieStore.retrieve(block.getStateRoot());
         System.out.printf("Encoding state from block %d %s", block.getNumber(), node.getHash());
         System.out.println();
 
-        destinationUnitrieStore.save(node);
+        List<byte[]> encodedNodes = new ArrayList<>();
+        List<byte[]> encodedValues = new ArrayList<>();
+        byte[] nodeBytes = node.toMessage();
+        encodedNodes.add(RLP.encodeElement(nodeBytes));
         Iterator<Trie.IterationElement> it = node.getInOrderIterator();
 
         while (it.hasNext()) {
             Trie iterating = it.next().getNode();
+            if (iterating.hasLongValue()) {
+                encodedValues.add(RLP.encodeElement(iterating.getValue()));
+            }
             if (iterating.isEmbeddable()) {
                 continue;
             }
-            destinationUnitrieStore.save(iterating);
+            nodeBytes = iterating.toMessage();
+            encodedNodes.add(RLP.encodeElement(nodeBytes));
         }
+
+        return RLP.encodeList(
+                RLP.encodeList(encodedNodes.toArray(new byte[encodedNodes.size()][])),
+                RLP.encodeList(encodedValues.toArray(new byte[encodedValues.size()][]))
+        );
     }
 
     private static Map<ConsensusRule, Long> all() {
@@ -138,33 +157,14 @@ public class FileExporter{
                     .collect(Collectors.toMap(Function.identity(), ignored -> 0L));
     }
 
-    private static void zipFile(File fileToZip, String fileName, ZipOutputStream zipOut) throws IOException {
-        if (fileToZip.isHidden()) {
-            return;
-        }
-        if (fileToZip.isDirectory()) {
-            if (fileName.endsWith("/")) {
-                zipOut.putNextEntry(new ZipEntry(fileName));
-                zipOut.closeEntry();
-            } else {
-                zipOut.putNextEntry(new ZipEntry(fileName + "/"));
-                zipOut.closeEntry();
-            }
-
-            for (File childFile : fileToZip.listFiles()) {
-                zipFile(childFile, fileName + "/" + childFile.getName(), zipOut);
-            }
-            return;
-        }
-
-        FileInputStream fis = new FileInputStream(fileToZip);
+    private static void zipFile(ByteArrayInputStream data, String fileName, ZipOutputStream zipOut) throws IOException {
         ZipEntry zipEntry = new ZipEntry(fileName);
         zipOut.putNextEntry(zipEntry);
 
         byte[] bytes = new byte[1024];
-        for (int length = fis.read(bytes); length >= 0; length = fis.read(bytes)) {
+        for (int length = data.read(bytes); length >= 0; length = data.read(bytes)) {
             zipOut.write(bytes, 0, length);
         }
-        fis.close();
+        data.close();
     }
 }

@@ -17,3 +17,8 @@ repositories {
 dependencies {
   compile 'co.rsk:rskj-core:1.1.0-SNAPSHOT'
 }
+
+tasks.withType(AbstractArchiveTask) {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
