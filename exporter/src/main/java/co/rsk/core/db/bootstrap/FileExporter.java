@@ -26,12 +26,14 @@ import org.ethereum.config.blockchain.upgrades.ConsensusRule;
 import org.ethereum.core.Block;
 import org.ethereum.core.BlockFactory;
 import org.ethereum.datasource.KeyValueDataSource;
+import org.ethereum.datasource.LevelDbDataSource;
 import org.ethereum.db.IndexedBlockStore;
 import org.ethereum.util.RLP;
 import org.mapdb.DB;
 import org.mapdb.DBMaker;
 
 import java.io.*;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -48,7 +50,7 @@ public class FileExporter{
             originDatabaseDir = args[1];
         }
 
-        KeyValueDataSource originBlockStoreDataSource = RskContext.makeDataSource("blocks", originDatabaseDir);
+        KeyValueDataSource originBlockStoreDataSource = LevelDbDataSource.makeDataSource(Paths.get(originDatabaseDir, "blocks"));
         MapDBBlocksIndex originBlockStoreIndex = getBlockIndex(originDatabaseDir);
         TrieStoreImpl originUnitrieStore = getTrieStore(originDatabaseDir);
 
@@ -76,7 +78,7 @@ public class FileExporter{
     }
 
     private static TrieStoreImpl getTrieStore(String originDatabaseDir) {
-        KeyValueDataSource originUnitrieDataSource = RskContext.makeDataSource("unitrie", originDatabaseDir);
+        KeyValueDataSource originUnitrieDataSource = LevelDbDataSource.makeDataSource(Paths.get(originDatabaseDir, "unitrie"));
         return new TrieStoreImpl(originUnitrieDataSource);
     }
 
@@ -124,7 +126,7 @@ public class FileExporter{
     }
 
     private static byte[] encodeState(TrieStoreImpl originUnitrieStore, Block block) {
-        Trie node = originUnitrieStore.retrieve(block.getStateRoot());
+        Trie node = originUnitrieStore.retrieve(block.getStateRoot()).get();
         System.out.printf("Encoding state from block %d %s", block.getNumber(), node.getHash());
         System.out.println();
 
