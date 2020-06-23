@@ -44,6 +44,7 @@ jobs:
                   gradle dependencies
       - run:
           name: Start RSKj & wait for synch process
+          no_output_timeout: 15m
           command: |
                   java -Ddatabase.dir=~/database -Dminer.client.autoMine=true -Drpc.providers.web.ws.enabled=true -cp ~/rsksmart/rskj/rskj-core/build/libs/rskj-core-2.1.0-SNAPSHOT-all.jar co.rsk.Start --testnet &               
                   sleep 720
