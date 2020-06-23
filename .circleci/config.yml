@@ -23,6 +23,11 @@ jobs:
 
     steps:
       - checkout
+      - restore_cache:
+        keys:
+          - v1-dependencies-{{ checksum "exporter/build.gradle" }}
+          # fallback to using the latest cache if no exact match is found
+          - v1-dependencies- 
       - run:
           name: Clone and Build RSKj
           command: |
@@ -30,12 +35,7 @@ jobs:
                   git clone git@github.com:rsksmart/rskj.git ~/rsksmart/rskj
                   cd ~/rsksmart/rskj/
                   ./configure.sh
-                  ./gradlew clean build -x test
-      - restore_cache:
-          keys:
-            - v1-dependencies-{{ checksum "exporter/build.gradle" }}
-            # fallback to using the latest cache if no exact match is found
-            - v1-dependencies-  
+                  ./gradlew clean build -x test 
       - run: 
           name: Gradle dependencies
           command: |
@@ -50,7 +50,7 @@ jobs:
       - run: 
           name: Build export 
           command: |
-                cd exporter
+                cd /home/circleci/repo
                 docker build -t exporter .  
 
       - run:
