@@ -33,7 +33,7 @@ jobs:
                   ./gradlew clean build -x test
       - restore_cache:
           keys:
-            - v1-dependencies-{{ checksum "build.gradle" }}
+            - v1-dependencies-{{ checksum "exporter/build.gradle" }}
             # fallback to using the latest cache if no exact match is found
             - v1-dependencies-  
       - run: 
@@ -48,8 +48,15 @@ jobs:
                   sleep 180
       
       - run: 
+          name: Build export 
+          command: |
+                cd exporter
+                docker build -t exporter .  
+
+      - run:
           name: Run export process
-          command: sh start.sh  
+          command: |
+                docker run -v /var/lib/rsk/database:/database -v output:/output exporter 1000 
       - save_cache:
           paths:
             - ~/.gradle
