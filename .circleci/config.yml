@@ -46,7 +46,7 @@ jobs:
           name: Start RSKj & wait for synch process
           command: |
                   java -Ddatabase.dir=~/database -Dminer.client.autoMine=true -Drpc.providers.web.ws.enabled=true -cp ~/rsksmart/rskj/rskj-core/build/libs/rskj-core-2.1.0-SNAPSHOT-all.jar co.rsk.Start --testnet &               
-                  sleep 400
+                  sleep 720
       
       - run: 
           name: Build export 
