@@ -57,7 +57,7 @@ jobs:
       - run:
           name: Run export process
           command: |
-                docker run -v ~/database/testnet:/database -v output:/output exporter 1000 
+                docker run -v ~/database/testnet:/database -v ~/output:/output exporter 100
       - save_cache:
           paths:
             - ~/.gradle
