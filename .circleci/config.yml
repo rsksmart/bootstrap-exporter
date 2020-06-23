@@ -45,7 +45,7 @@ jobs:
       - run:
           name: Start RSKj & wait for synch process
           command: |
-                  java -Dminer.client.autoMine=true -Drpc.providers.web.ws.enabled=true -cp ~/rsksmart/rskj/rskj-core/build/libs/rskj-core-2.1.0-SNAPSHOT-all.jar co.rsk.Start --regtest  nohup &               
+                  java -Ddatabase.dir=/var/lib/rsk/database -Dminer.client.autoMine=true -Drpc.providers.web.ws.enabled=true -cp ~/rsksmart/rskj/rskj-core/build/libs/rskj-core-2.1.0-SNAPSHOT-all.jar co.rsk.Start --testnet nohup &               
                   sleep 180
       
       - run: 
@@ -57,7 +57,7 @@ jobs:
       - run:
           name: Run export process
           command: |
-                docker run -v /var/lib/rsk/database:/database -v output:/output exporter 1000 
+                docker run -v /var/lib/rsk/database/testnet:/database -v output:/output exporter 1000 
       - save_cache:
           paths:
             - ~/.gradle
