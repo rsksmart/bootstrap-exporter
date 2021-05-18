@@ -18,115 +18,109 @@
 package co.rsk.core.db.bootstrap;
 
 import co.rsk.RskContext;
-import co.rsk.db.MapDBBlocksIndex;
+import co.rsk.core.BlockDifficulty;
 import co.rsk.trie.Trie;
-import co.rsk.trie.TrieStoreImpl;
-import org.ethereum.config.blockchain.upgrades.ActivationConfig;
-import org.ethereum.config.blockchain.upgrades.ConsensusRule;
+import co.rsk.trie.TrieStore;
 import org.ethereum.core.Block;
-import org.ethereum.core.BlockFactory;
-import org.ethereum.datasource.KeyValueDataSource;
-import org.ethereum.db.IndexedBlockStore;
+import org.ethereum.db.BlockStore;
 import org.ethereum.util.RLP;
-import org.mapdb.DB;
-import org.mapdb.DBMaker;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public class FileExporter{
 
+    private static final Logger logger = LoggerFactory.getLogger("exporter");
+
     private static final int BLOCKS_NEEDED = 4000;
 
+    private static final String SYS_PROP_OUTPUT = "exporter.output";
+    private static final String CMD_ARG_OUTPUT = "-exporter-output";
+
+    private static final String BOOTSTRAP_DATA_ZIP_NAME = "bootstrap-data.zip";
+    private static final String BOOTSTRAP_DATA_FILE_NAME = "bootstrap-data.bin";
+
     public static void main(String[] args) throws IOException {
-        String originDatabaseDir = "/database";
-        if (args.length > 1 && args[1] != null) {
-            originDatabaseDir = args[1];
+        final List<String> argList = new ArrayList<>(Arrays.asList(args));
+
+        // first arg should always be a number of the last block of a range to process
+        final long to = Long.parseLong(argList.get(0));
+        final long from = to - BLOCKS_NEEDED;
+        // remove the first arg, as there's no need to propagate it as part of rsk args
+        argList.remove(0);
+
+        final int destFolderKeyIndex = argList.indexOf(CMD_ARG_OUTPUT);
+        final String destinationFolder;
+        if (destFolderKeyIndex != -1) {
+            // remove the destination arg key and value, as there's no need to propagate them as part of rsk args
+            destinationFolder = argList.remove(destFolderKeyIndex + 1);
+            argList.remove(destFolderKeyIndex);
+        } else {
+            destinationFolder = System.getProperty(SYS_PROP_OUTPUT, "./output");
         }
 
-        KeyValueDataSource originBlockStoreDataSource = RskContext.makeDataSource("blocks", originDatabaseDir);
-        MapDBBlocksIndex originBlockStoreIndex = getBlockIndex(originDatabaseDir);
-        TrieStoreImpl originUnitrieStore = getTrieStore(originDatabaseDir);
+        final String[] rskArgs = argList.toArray(new String[0]);
+        final RskContext rskContext = new RskContext(rskArgs);
 
-        long to = Long.valueOf(args[0]);
-        long from = to - BLOCKS_NEEDED;
-        List<IndexedBlockStore.BlockInfo> lastBlocks = originBlockStoreIndex.getBlocksByNumber(to);
-        Optional<IndexedBlockStore.BlockInfo> bestInfo = lastBlocks.stream().filter(IndexedBlockStore.BlockInfo::isMainChain).findFirst();
-        BlockFactory blockFactory = new BlockFactory(new ActivationConfig(all()));
-        Block bestBlock = blockFactory.decodeBlock(originBlockStoreDataSource.get(bestInfo.get().getHash().getBytes()));
+        logger.info("Database folder: {}", rskContext.getRskSystemProperties().databaseDir());
+        logger.info("Destination folder: {}", destinationFolder);
 
-        byte[] blocks = encodeBlocks(originBlockStoreDataSource, originBlockStoreIndex, from, to);
-        byte[] state = encodeState(originUnitrieStore, bestBlock);
-        byte[] bootstrap = RLP.encodeList(RLP.encodeElement(blocks), RLP.encodeElement(state));
+        final BlockStore originBlockStore = rskContext.getBlockStore();
+        final TrieStore originTrieStore = rskContext.getTrieStore();
 
-        String destinationFolder = "/output/";
-        if (args.length > 2 && args[2] != null){
-            destinationFolder = args[2];
-        }
+        final Block bestBlock = Objects.requireNonNull(originBlockStore.getChainBlockByNumber(to));
 
-        FileOutputStream fos = new FileOutputStream(destinationFolder + "bootstrap-data.zip");
+        final long start = System.currentTimeMillis();
+        final byte[] blocks = encodeBlocks(originBlockStore, from, to);
+        final byte[] state = encodeState(originTrieStore, bestBlock);
+        final byte[] bootstrap = RLP.encodeList(RLP.encodeElement(blocks), RLP.encodeElement(state));
+
+        final long encodingDuration = System.currentTimeMillis() - start;
+
+        FileOutputStream fos = new FileOutputStream(new File(destinationFolder, BOOTSTRAP_DATA_ZIP_NAME));
         ZipOutputStream zipOut = new ZipOutputStream(fos);
 
-        zipFile(new ByteArrayInputStream(bootstrap), "bootstrap-data.bin", zipOut);
+        zipFile(new ByteArrayInputStream(bootstrap), zipOut);
         zipOut.close();
+
+        final long totalDuration = System.currentTimeMillis() - start;
+        logger.info("Encoding duration: " + encodingDuration + " ms; Total duration: " + totalDuration + " ms.");
+
+        System.exit(0);
     }
 
-    private static TrieStoreImpl getTrieStore(String originDatabaseDir) {
-        KeyValueDataSource originUnitrieDataSource = RskContext.makeDataSource("unitrie", originDatabaseDir);
-        return new TrieStoreImpl(originUnitrieDataSource);
-    }
-
-    private static MapDBBlocksIndex getBlockIndex(String databaseDir) {
-        File blockIndexDirectory = new File(databaseDir + "/blocks/");
-        File dbFile = new File(blockIndexDirectory, "index");
-        if (!blockIndexDirectory.exists()) {
-            if (!blockIndexDirectory.mkdirs()) {
-                throw new IllegalArgumentException(String.format(
-                        "Unable to create blocks directory: %s", blockIndexDirectory
-                ));
-            }
-        }
-
-        DB indexDB = DBMaker.fileDB(dbFile)
-                .closeOnJvmShutdown()
-                .make();
-
-        return new MapDBBlocksIndex(indexDB);
-    }
-
-    private static byte[] encodeBlocks(KeyValueDataSource originBlockStoreDataSource,
-                                       MapDBBlocksIndex originBlockStoreIndex,
-                                       long from,
-                                       long to) {
-
-        System.out.printf("Encoding blocks from %d to %d", from, to);
-        System.out.println();
+    private static byte[] encodeBlocks(BlockStore originBlockStore, long from, long to) {
+        logger.info("Encoding blocks from {} to {}", from, to);
         byte[][] encodedBlocks = new byte[BLOCKS_NEEDED][];
+
+        logger.info("Blocks processing...");
         for(int i = 0; i < to - from; i++) {
-            byte[][] encodedTuple = new byte[2][];
-            long blockNumber = from + (i + 1);
-            final int j = i;
-            List<IndexedBlockStore.BlockInfo> blockInfos = originBlockStoreIndex.getBlocksByNumber(blockNumber);
-            blockInfos.stream()
-                    .filter(IndexedBlockStore.BlockInfo::isMainChain)
-                    .forEach(bi -> {
-                        encodedTuple[0] = RLP.encodeElement(originBlockStoreDataSource.get(bi.getHash().getBytes()));
-                        encodedTuple[1] = RLP.encodeElement(bi.getCummDifficulty().getBytes());
-                        encodedBlocks[j] = RLP.encodeList(encodedTuple);
-                    });
+            final long blockNumber = from + (i + 1);
+
+            final Block block = originBlockStore.getChainBlockByNumber(blockNumber);
+            final BlockDifficulty totalDifficulty = originBlockStore.getTotalDifficultyForHash(block.getHash().getBytes());
+
+            final byte[][] encodedTuple = new byte[2][];
+            encodedTuple[0] = RLP.encodeElement(block.getEncoded());
+            encodedTuple[1] = RLP.encodeElement(totalDifficulty.getBytes());
+
+            encodedBlocks[i] = RLP.encodeList(encodedTuple);
         }
+        logger.info("Blocks processing completed");
 
         return RLP.encodeList(encodedBlocks);
     }
 
-    private static byte[] encodeState(TrieStoreImpl originUnitrieStore, Block block) {
-        Trie node = originUnitrieStore.retrieve(block.getStateRoot());
-        System.out.printf("Encoding state from block %d %s", block.getNumber(), node.getHash());
-        System.out.println();
+    private static byte[] encodeState(TrieStore originTrieStore, Block block) {
+        Trie node = originTrieStore.retrieve(block.getStateRoot()).orElseThrow(NullPointerException::new);
+        logger.info("Encoding state from block {} {}", block.getNumber(), node.getHash());
 
         List<byte[]> encodedNodes = new ArrayList<>();
         List<byte[]> encodedValues = new ArrayList<>();
@@ -134,6 +128,7 @@ public class FileExporter{
         encodedNodes.add(RLP.encodeElement(nodeBytes));
         Iterator<Trie.IterationElement> it = node.getInOrderIterator();
 
+        logger.info("Trie processing...");
         while (it.hasNext()) {
             Trie iterating = it.next().getNode();
             if (iterating.hasLongValue()) {
@@ -144,7 +139,13 @@ public class FileExporter{
             }
             nodeBytes = iterating.toMessage();
             encodedNodes.add(RLP.encodeElement(nodeBytes));
+
+            if (encodedNodes.size() % 10_000 == 0) {
+                logger.info("Processed {} nodes", encodedNodes.size());
+            }
         }
+        logger.info("Processed {} nodes", encodedNodes.size());
+        logger.info("Trie processing completed");
 
         return RLP.encodeList(
                 RLP.encodeList(encodedNodes.toArray(new byte[encodedNodes.size()][])),
@@ -152,13 +153,8 @@ public class FileExporter{
         );
     }
 
-    private static Map<ConsensusRule, Long> all() {
-        return EnumSet.allOf(ConsensusRule.class).stream()
-                    .collect(Collectors.toMap(Function.identity(), ignored -> 0L));
-    }
-
-    private static void zipFile(ByteArrayInputStream data, String fileName, ZipOutputStream zipOut) throws IOException {
-        ZipEntry zipEntry = new ZipEntry(fileName);
+    private static void zipFile(ByteArrayInputStream data, ZipOutputStream zipOut) throws IOException {
+        ZipEntry zipEntry = new ZipEntry(BOOTSTRAP_DATA_FILE_NAME);
         zipOut.putNextEntry(zipEntry);
 
         byte[] bytes = new byte[1024];
