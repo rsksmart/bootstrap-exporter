@@ -15,7 +15,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.rsk:rskj-core:3.0.0-IRIS'
+    implementation 'co.rsk:rskj-core:3.3.0-IRIS'
 
     implementation 'org.slf4j:slf4j-api:1.7.25'
     runtimeOnly 'org.slf4j:log4j-over-slf4j:1.7.25'
