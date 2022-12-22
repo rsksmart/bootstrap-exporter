@@ -19,6 +19,7 @@ package co.rsk.core.db.bootstrap;
 
 import co.rsk.RskContext;
 import co.rsk.core.BlockDifficulty;
+import co.rsk.trie.IterationElement;
 import co.rsk.trie.Trie;
 import co.rsk.trie.TrieStore;
 import org.ethereum.core.Block;
@@ -126,7 +127,7 @@ public class FileExporter{
         List<byte[]> encodedValues = new ArrayList<>();
         byte[] nodeBytes = node.toMessage();
         encodedNodes.add(RLP.encodeElement(nodeBytes));
-        Iterator<Trie.IterationElement> it = node.getInOrderIterator();
+        Iterator<IterationElement> it = node.getInOrderIterator();
 
         logger.info("Trie processing...");
         while (it.hasNext()) {
