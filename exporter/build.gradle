@@ -2,8 +2,8 @@ plugins {
   id 'application'
 }
 
-sourceCompatibility = '1.8'
-targetCompatibility = '1.8'
+sourceCompatibility = 17
+targetCompatibility = 17
 version = '0.0.1'
 mainClassName = 'co.rsk.core.db.bootstrap.FileExporter'
 
@@ -15,7 +15,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'co.rsk:rskj-core:4.1.1-HOP'
+    implementation 'co.rsk:rskj-core:7.0.0-LOVELL'
 
     implementation 'org.slf4j:slf4j-api:1.7.25'
     runtimeOnly 'org.slf4j:log4j-over-slf4j:1.7.25'

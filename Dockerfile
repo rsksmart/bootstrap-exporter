@@ -1,4 +1,4 @@
-FROM gradle:jdk8
+FROM gradle:jdk17
 
 RUN apt update
 RUN apt install -y --no-install-recommends strip-nondeterminism file
