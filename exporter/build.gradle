@@ -8,19 +8,28 @@ version = '0.0.1'
 mainClassName = 'co.rsk.core.db.bootstrap.FileExporter'
 
 repositories {
-  jcenter()
+  mavenCentral()
   maven {
     url "https://deps.rsklabs.io"
   }
 }
 
 dependencies {
-    implementation 'co.rsk:rskj-core:9.0.1-VETIVER'
+    // Official v2-bootstrap release: carries Trie#getInOrderIterator(boolean) + BootstrapV2Format.
+    implementation 'co.rsk:rskj-core:9.0.4-VETIVER'
 
     implementation 'org.slf4j:slf4j-api:1.7.25'
     runtimeOnly 'org.slf4j:log4j-over-slf4j:1.7.25'
     runtimeOnly 'ch.qos.logback:logback-classic:1.2.2'
     runtimeOnly 'ch.qos.logback:logback-core:1.2.2'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.3'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.3'
+    testImplementation 'org.mockito:mockito-inline:5.2.0'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 tasks.withType(AbstractArchiveTask) {
